@@ -78,11 +78,32 @@ def process_pattern_2(yaw, pitch):
 
 def process_pattern_3(yaw, pitch):
     # パターン3：顔の向きに合わせてマウスを動かす
-    screen_width, screen_height = pyautogui.size()
-    move_x = int(yaw * screen_width / 100)
-    move_y = int(pitch * screen_height / 100)
-    current_x, current_y = pyautogui.position()
-    pyautogui.moveTo(current_x + move_x, current_y + move_y)
+    x,y = pyautogui.position()
+    w,h = pyautogui.size()
+    if 10 < pitch < 50:
+        #print("上")
+        if not y-100<0:
+            pyautogui.moveRel(0, -100)
+        else:
+            pyautogui.moveTo(x,1)
+    if -50 < pitch < -10:
+        #print("下")
+        if not y+100>h:
+            pyautogui.moveRel(0, 100)
+        else:
+            pyautogui.moveTo(x,h-1)
+    if 10 < yaw < 50:
+        #print("左")
+        if not x-100<0:
+            pyautogui.moveRel(-100, 0)
+        else:
+            pyautogui.moveTo(1,y)
+    if -50 < yaw < -10:
+        #print("右")
+        if not x+100>w:
+            pyautogui.moveRel(100, 0)
+        else:
+            pyautogui.moveTo(w-1,y)
 
 while True:
     ret, frame = capture.read()
