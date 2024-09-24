@@ -5,6 +5,7 @@ from imutils import face_utils
 import numpy as np
 import pyautogui
 import time
+import pygame
 
 # VideoCapture オブジェクトを取得します
 DEVICE_ID = 0
@@ -26,15 +27,36 @@ reset_time_pitch = None
 last_yaw_press = None
 last_pitch_press = None
 
-def check_eye_closed(shape):
-    # 両目が閉じているかの確認
-    Right_eye_upper_y = shape[43][1]
-    Right_eye_lower_y = shape[47][1]
-    Left_eye_upper_y = shape[37][1]
-    Left_eye_lower_y = shape[41][1]
-    print(Right_eye_upper_y - Right_eye_lower_y, Left_eye_upper_y - Left_eye_lower_y)
+# Pygameの初期化
+pygame.mixer.init()
+# 効果音ファイルの読み込み
+sound = pygame.mixer.Sound("modechange.mp3")
+sound.set_volume(0.2)
 
-    return Right_eye_upper_y - Right_eye_lower_y > -10 and Left_eye_upper_y - Left_eye_lower_y > -10
+def calculate_ear(eye):
+    # 目のアスペクト比を計算する関数
+    A = np.linalg.norm(eye[1] - eye[5])  # 縦の距離1
+    B = np.linalg.norm(eye[2] - eye[4])  # 縦の距離2
+    C = np.linalg.norm(eye[0] - eye[3])  # 横の距離
+
+    ear = (A + B) / (2.0 * C)
+    return ear
+
+def check_eye_closed(shape):
+    # 目のランドマークのインデックス
+    left_eye = shape[36:42]   # 左目
+    right_eye = shape[42:48]  # 右目
+
+    # 左右の目のアスペクト比を計算
+    left_ear = calculate_ear(left_eye)
+    right_ear = calculate_ear(right_eye)
+
+    # 両目のEARの平均値を取得
+    ear = (left_ear + right_ear) / 2.0
+
+    # EARが一定値以下の場合、目が閉じていると判定（一般的に0.2~0.25がしきい値として使用される）
+    return ear < 0.2
+
 
 def process_pattern_1(yaw, pitch):
     # パターン1：連続で方向キーを入力
@@ -77,33 +99,51 @@ def process_pattern_2(yaw, pitch):
         wait_for_reset_pitch = False
 
 def process_pattern_3(yaw, pitch):
-    # パターン3：顔の向きに合わせてマウスを動かす
-    x,y = pyautogui.position()
-    w,h = pyautogui.size()
+    # パターン3：顔の向きに合わせてマウスを滑らかに動かす（pitchとyawの大きさに応じて）
+    x, y = pyautogui.position()  # 現在のマウスの位置
+    w, h = pyautogui.size()  # 画面のサイズ
+
+    # 基本の移動速度（小さい動きから大きい動きに拡張するためのベース値）
+    base_speed = 5  # これを基準として移動距離を調整
+    duration = 0.05  # 移動時間（秒）
+
+    # pitch（上下方向）の角度に応じて移動距離を調整
+    # 例えば、pitchが50度に近いほど移動が大きくなる
+    vertical_speed = base_speed * abs(pitch)  # pitchの最大角度50度を基準に調整
+
+    # 上方向
     if 10 < pitch < 50:
-        #print("上")
-        if not y-100<0:
-            pyautogui.moveRel(0, -100)
+        if y - vertical_speed > 0:
+            pyautogui.moveRel(0, -vertical_speed, duration=duration)  # 上に移動
         else:
-            pyautogui.moveTo(x,1)
+            pyautogui.moveTo(x, 1, duration=duration)  # 画面上端に固定
+
+    # 下方向
     if -50 < pitch < -10:
-        #print("下")
-        if not y+100>h:
-            pyautogui.moveRel(0, 100)
+        if y + vertical_speed < h:
+            pyautogui.moveRel(0, vertical_speed, duration=duration)  # 下に移動
         else:
-            pyautogui.moveTo(x,h-1)
+            pyautogui.moveTo(x, h - 1, duration=duration)  # 画面下端に固定
+
+    # yaw（左右方向）の角度に応じて移動距離を調整
+    # 例えば、yawが50度に近いほど移動が大きくなる
+    horizontal_speed = base_speed * abs(yaw)  # yawの最大角度50度を基準に調整
+
+    # 左方向
     if 10 < yaw < 50:
-        #print("左")
-        if not x-100<0:
-            pyautogui.moveRel(-100, 0)
+        if x - horizontal_speed > 0:
+            pyautogui.moveRel(-horizontal_speed, 0, duration=duration)  # 左に移動
         else:
-            pyautogui.moveTo(1,y)
+            pyautogui.moveTo(1, y, duration=duration)  # 画面左端に固定
+
+    # 右方向
     if -50 < yaw < -10:
-        #print("右")
-        if not x+100>w:
-            pyautogui.moveRel(100, 0)
+        if x + horizontal_speed < w:
+            pyautogui.moveRel(horizontal_speed, 0, duration=duration)  # 右に移動
         else:
-            pyautogui.moveTo(w-1,y)
+            pyautogui.moveTo(w - 1, y, duration=duration)  # 画面右端に固定
+
+
 
 while True:
     ret, frame = capture.read()
@@ -170,18 +210,24 @@ while True:
         pitch = eulerAngles[0].item()
         roll = eulerAngles[2].item()
 
+        change_permission = True  # パターンが変更されたかを記録するフラグ
+
         # 両目が閉じられているか確認
         if check_eye_closed(shape):
             if start_time_eye is None:
-                start_time_eye = time.time()
-            elif time.time() - start_time_eye > 1:
-                # 1秒以上閉じていたらパターン変更
+                start_time_eye = time.time()  # 目が閉じられた時間を記録
+            elif time.time() - start_time_eye > 1 and change_permission:
+            # 1秒以上閉じていて、まだパターン変更が行われていない場合
                 if time.time() - last_pattern_change > pattern_delay:
-                    pattern = (pattern % 3) + 1
+                    pattern = (pattern % 3) + 1  # パターンを1, 2, 3の順に切り替え
                     last_pattern_change = time.time()
+                    change_permission = False  # パターンが変更されたことを記録
                     print(f"Pattern changed to: {pattern}")
+                    sound.play()
         else:
-            start_time_eye = None
+            start_time_eye = None  # 目が開いた場合、閉じていた時間をリセット
+            change_permission = True  # 目が開いたので次のパターン変更を許可
+
 
         # 現在のパターンに応じて処理
         if pattern == 1:
@@ -200,4 +246,5 @@ while True:
         break
 
 capture.release()
+pygame.mixer.quit()
 cv2.destroyAllWindows()
